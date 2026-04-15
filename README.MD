@@ -51,7 +51,7 @@ Fine-tune the "MegaDescriptor-T-224" model to Czech-Lyxn dataset.
 It is highly recommended to use a GPU for the training.
 ```
 python train_model.py
-``
+```
 
 Finally, we can apply the fine-tuned model for inference.
 ```
