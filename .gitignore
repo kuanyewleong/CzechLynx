@@ -13,4 +13,4 @@ validation_ijbs
 *.sh
 *.zip
 result
-data
+data/*
