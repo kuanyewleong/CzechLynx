@@ -88,80 +88,9 @@ def load_pickle(path: Path):
         return pickle.load(f)
 
 
-def find_index_by_image_path(dataset_obj, image_path):
-    """
-    Return row index in dataset_obj.metadata matching image_path.
-    Tries several normalized variants.
-    """
-    if "path" not in dataset_obj.metadata.columns:
-        raise KeyError("dataset_obj.metadata does not contain a 'path' column.")
-
-    candidates = {
-        image_path,
-        os.path.normpath(image_path),
-        image_path.replace("\\", "/"),
-        os.path.normpath(image_path).replace("\\", "/"),
-    }
-
-    metadata_paths = dataset_obj.metadata["path"].astype(str)
-
-    for i, p in enumerate(metadata_paths):
-        p_norm = os.path.normpath(str(p))
-        p_posix = p_norm.replace("\\", "/")
-        if p in candidates or p_norm in candidates or p_posix in candidates:
-            return i
-
-    raise ValueError(f"Image path not found in dataset: {image_path}")
-
-
 def get_label_by_index(dataset_obj, idx):
     return dataset_obj.df[dataset_obj.col_label].iloc[idx]
 
-
-def visualize_user_selected_test_comparison(
-    dataset_test,
-    similarity_test_test,
-    reference_idx,
-    compare_indices,
-    save_path,
-):
-    """
-    Visualize:
-      - one reference image from test set
-      - three user-selected comparison images from test set
-
-    similarity_test_test shape:
-      [len(dataset_test), len(dataset_test)]
-    """
-    if len(compare_indices) != 3:
-        raise ValueError("compare_indices must contain exactly 3 indices.")
-
-    ref_img, ref_label = dataset_test[reference_idx]
-
-    compare_labels = [get_label_by_index(dataset_test, i) for i in compare_indices]
-    if len(set(compare_labels)) != 1:
-        raise ValueError(
-            f"The 3 comparison images do not share the same ID. "
-            f"Found labels: {compare_labels}"
-        )
-
-    scores = similarity_test_test[reference_idx, compare_indices]
-
-    fig, ax = plt.subplots(1, 4, figsize=(12, 3))
-
-    ax[0].imshow(ref_img)
-    ax[0].set_title(f"Reference\n{ref_label}")
-    ax[0].axis("off")
-
-    for j, idx in enumerate(compare_indices):
-        img, label = dataset_test[idx]
-        ax[j + 1].imshow(img)
-        ax[j + 1].set_title(f"{label}\nscore={scores[j]:.3f}")
-        ax[j + 1].axis("off")
-
-    plt.tight_layout()
-    fig.savefig(save_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
 
 
 # ============================================================
@@ -535,14 +464,14 @@ def sample_candidate_and_comparisons_by_two_ids(
     return candidate_idx, [int(x) for x in compare_indices]
 
 
-candidate_id = "lynx_303"
+candidate_id = "lynx_231"
 comparison_id = "lynx_231"
 
 # comparison_random_seed = 42
 # num_compare_images = 3
 
 # comparison_id = "lynx_004"
-selection_random_seed = 100
+selection_random_seed = 128
 
 
 # ============================================================
