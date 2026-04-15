@@ -30,6 +30,15 @@ Install the needed python packages
 pip install -r requirements.txt
 ```
 
+## Visualizing the Data Images
+Now you can visualize the images using either of these lines:
+```
+# for original images with annotated mask
+python visualize_samples.py
+
+# for original images with both annotated mask and keypoints
+python visualize_keypoints.py
+```
 
 ## CzechLynx baseline with WildFusion (preparing the recognition model)
 Install the needed python packages
