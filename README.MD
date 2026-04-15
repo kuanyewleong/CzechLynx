@@ -46,3 +46,14 @@ Install the needed python packages
 pip install git+https://github.com/WildlifeDatasets/wildlife-datasets@develop
 pip install git+https://github.com/WildlifeDatasets/wildlife-tools
 ```
+
+Fine-tune the "MegaDescriptor-T-224" model to Czech-Lyxn dataset. 
+It is highly recommended to use a GPU for the training.
+```
+python train_model.py
+``
+
+Finally, we can apply the fine-tuned model for inference.
+```
+infer_model.py
+```

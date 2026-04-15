@@ -1,4 +1,5 @@
 .venv
+.venv*
 __pycache__
 *.pyc
 .vscode
@@ -15,3 +16,6 @@ validation_ijbs
 result
 data/*
 !data/.gitkeep
+output
+logs
+retrieval_figures
