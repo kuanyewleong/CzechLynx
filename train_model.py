@@ -18,7 +18,7 @@ from wildlife_tools.data import WildlifeDataset
 
 lr = 0.0001
 epochs = 10
-device = 'cuda'
+device = "cuda" if torch.cuda.is_available() else "cpu"
 num_workers = 4
 batch_size = 128
 accumulation_steps = 4

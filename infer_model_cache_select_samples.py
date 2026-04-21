@@ -98,7 +98,7 @@ def get_label_by_index(dataset_obj, idx):
 # ============================================================
 
 root = "data"
-output_folder = "output/run_20260415_150322"
+output_folder = "output/run_20260415_150609"
 cache_dir = Path(output_folder) / "cache"
 cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -363,39 +363,6 @@ for k in range(1, top_k + 1):
     print(f"  Top {k}: {acc:.3f}")
 
 
-def sample_candidate_and_comparisons_from_test_id(
-    dataset_obj,
-    target_label,
-    n_compare=3,
-    random_seed=42,
-):
-    """
-    From the TEST dataset subset, pick:
-      - 1 candidate image
-      - n_compare other images from the same ID
-
-    Returns:
-      candidate_idx: int
-      compare_indices: list[int]
-    """
-    labels = dataset_obj.df[dataset_obj.col_label].values
-    candidate_pool = np.where(labels == target_label)[0]
-
-    required = 1 + n_compare
-    if len(candidate_pool) < required:
-        raise ValueError(
-            f"Not enough test images for ID '{target_label}'. "
-            f"Found {len(candidate_pool)}, need at least {required} "
-            f"(1 candidate + {n_compare} comparison images)."
-        )
-
-    rng = np.random.default_rng(random_seed)
-    chosen = rng.choice(candidate_pool, size=required, replace=False)
-
-    candidate_idx = int(chosen[0])
-    compare_indices = [int(x) for x in chosen[1:]]
-    return candidate_idx, compare_indices
-
 def visualize_candidate_vs_three(
     dataset_test,
     similarity_test_test,
@@ -464,14 +431,10 @@ def sample_candidate_and_comparisons_by_two_ids(
     return candidate_idx, [int(x) for x in compare_indices]
 
 
-candidate_id = "lynx_231"
-comparison_id = "lynx_231"
+candidate_id = "lynx_200"
+comparison_id = "lynx_200"
 
-# comparison_random_seed = 42
-# num_compare_images = 3
-
-# comparison_id = "lynx_004"
-selection_random_seed = 128
+selection_random_seed = 42
 
 
 # ============================================================
