@@ -39,6 +39,8 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 num_examples = 8
 top_k = 3
 wildfusion_B = 10
+aliked_batch_size = 16
+mega_batch_size = 16
 
 
 # -------------------------------
@@ -103,7 +105,7 @@ def load_pickle(path: Path):
         return pickle.load(f)
 
 
-def build_protocol_splits(metadata_path: str, split_col: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def build_protocol_splits(metadata_path: str, split_col: str):
     if os.path.isfile(train_split_csv) and os.path.isfile(val_split_csv) and os.path.isfile(test_split_csv):
         print('[INFO] Loading explicit train/val/test splits from output folder.')
         train_df = pd.read_csv(train_split_csv)
@@ -116,7 +118,6 @@ def build_protocol_splits(metadata_path: str, split_col: str) -> tuple[pd.DataFr
     train_df = metadata[metadata[split_col] == 'train'].copy().reset_index(drop=True)
     test_df = metadata[metadata[split_col] == 'test'].copy().reset_index(drop=True)
 
-    # lightweight fallback: carve calibration/validation from train identities only
     val_parts = []
     train_parts = []
     for _, group in train_df.groupby(label_column, sort=False):
@@ -128,7 +129,10 @@ def build_protocol_splits(metadata_path: str, split_col: str) -> tuple[pd.DataFr
             train_parts.append(group)
 
     train_df = pd.concat(train_parts, axis=0).reset_index(drop=True)
-    val_df = pd.concat(val_parts, axis=0).reset_index(drop=True) if val_parts else train_df.iloc[: min(100, len(train_df))].copy()
+    if val_parts:
+        val_df = pd.concat(val_parts, axis=0).reset_index(drop=True)
+    else:
+        val_df = train_df.iloc[: min(100, len(train_df))].copy().reset_index(drop=True)
     return train_df, val_df, test_df
 
 
@@ -167,6 +171,18 @@ def save_retrieval_examples(similarity: np.ndarray, dataset_query, dataset_datab
         plt.close(fig)
 
 
+def compute_or_load_similarity(cache_name: str, compute_fn):
+    path = cache_dir / f'{cache_name}.npz'
+    if path.exists():
+        print(f'[CACHE HIT] Loading similarity matrix from: {path}')
+        return np.load(path)['similarity']
+    print(f'[CACHE MISS] Computing similarity: {cache_name}')
+    sim = np.asarray(compute_fn(), dtype=np.float32)
+    np.savez_compressed(path, similarity=sim)
+    print(f'[CACHE SAVE] Similarity matrix saved to: {path}')
+    return sim
+
+
 # -------------------------------
 # Transforms
 # -------------------------------
@@ -192,8 +208,8 @@ transform_aliked = T.Compose([
 metadata_path = os.path.join(root, 'CzechLynxDataset-Metadata-Real.csv')
 train_metadata, val_metadata, test_metadata = build_protocol_splits(metadata_path, split_column)
 
-for name, df in [('Train gallery', train_metadata), ('Calibration', val_metadata), ('Test query', test_metadata)]:
-    print(f'{name}: {len(df)} images | {df[label_column].nunique()} identities')
+for split_name, df in [('Train gallery', train_metadata), ('Calibration', val_metadata), ('Test query', test_metadata)]:
+    print(f'{split_name}: {len(df)} images | {df[label_column].nunique()} identities')
 
 dataset_train_gallery = WildlifeDataset(root, train_metadata, load_label=True, col_label=label_column)
 dataset_calibration = WildlifeDataset(root, val_metadata, load_label=True, col_label=label_column)
@@ -219,24 +235,40 @@ model.eval()
 
 # -------------------------------
 # Similarity pipelines
+# Standalone pipelines are uncalibrated.
+# Fusion pipelines keep calibration and can reuse cached calibrators.
 # -------------------------------
 matcher_aliked = SimilarityPipeline(
-    matcher=MatchLightGlue(features='aliked', device=device, batch_size=16),
+    matcher=MatchLightGlue(features='aliked', device=device, batch_size=aliked_batch_size),
+    extractor=AlikedExtractor(),
+    transform=transform_aliked,
+    calibration=None,
+)
+
+matcher_mega = SimilarityPipeline(
+    matcher=CosineSimilarity(),
+    extractor=DeepFeatures(model=model, device=device, batch_size=mega_batch_size),
+    transform=transform_mega,
+    calibration=None,
+)
+
+matcher_aliked_fusion = SimilarityPipeline(
+    matcher=MatchLightGlue(features='aliked', device=device, batch_size=aliked_batch_size),
     extractor=AlikedExtractor(),
     transform=transform_aliked,
     calibration=IsotonicCalibration(),
 )
 
-matcher_mega = SimilarityPipeline(
+matcher_mega_fusion = SimilarityPipeline(
     matcher=CosineSimilarity(),
-    extractor=DeepFeatures(model=model, device=device, batch_size=16),
+    extractor=DeepFeatures(model=model, device=device, batch_size=mega_batch_size),
     transform=transform_mega,
     calibration=IsotonicCalibration(),
 )
 
 wildfusion = WildFusion(
-    calibrated_pipelines=[matcher_aliked, matcher_mega],
-    priority_pipeline=matcher_mega,
+    calibrated_pipelines=[matcher_aliked_fusion, matcher_mega_fusion],
+    priority_pipeline=matcher_mega_fusion,
 )
 
 
@@ -262,6 +294,7 @@ calib_cache_key = make_cache_key({
     'calibration_type': 'IsotonicCalibration',
     'aliked_transform': 'Resize512_ToTensor',
     'mega_transform': 'Resize384_ToTensor_NormalizeImageNet',
+    'wildfusion_priority': 'matcher_mega_fusion',
 })
 
 aliked_calib_path = cache_dir / f'aliked_isotonic_{calib_cache_key}.pkl'
@@ -269,43 +302,34 @@ mega_calib_path = cache_dir / f'mega_isotonic_{calib_cache_key}.pkl'
 
 
 # -------------------------------
-# Calibration: calibration vs gallery, not self-vs-self
+# Calibration: val vs gallery, not self-vs-self
+# Only affects fusion pipelines.
 # -------------------------------
 if aliked_calib_path.exists() and mega_calib_path.exists():
     print(f'[CACHE HIT] Loading calibration from:\n  {aliked_calib_path}\n  {mega_calib_path}')
-    matcher_aliked.calibration = load_pickle(aliked_calib_path)
-    matcher_mega.calibration = load_pickle(mega_calib_path)
+    matcher_aliked_fusion.calibration = load_pickle(aliked_calib_path)
+    matcher_mega_fusion.calibration = load_pickle(mega_calib_path)
 else:
     print('[CACHE MISS] Fitting WildFusion calibration on val vs train-gallery ...')
     wildfusion.fit_calibration(dataset_calibration, dataset_train_gallery)
-    save_pickle(matcher_aliked.calibration, aliked_calib_path)
-    save_pickle(matcher_mega.calibration, mega_calib_path)
+    save_pickle(matcher_aliked_fusion.calibration, aliked_calib_path)
+    save_pickle(matcher_mega_fusion.calibration, mega_calib_path)
     print(f'[CACHE SAVE] Calibration saved to:\n  {aliked_calib_path}\n  {mega_calib_path}')
 
 
 # -------------------------------
 # Similarity computation with ablations
 # -------------------------------
-def compute_or_load_similarity(cache_name: str, compute_fn):
-    path = cache_dir / f'{cache_name}.npz'
-    if path.exists():
-        print(f'[CACHE HIT] Loading similarity matrix from: {path}')
-        return np.load(path)['similarity']
-    print(f'[CACHE MISS] Computing similarity: {cache_name}')
-    sim = np.asarray(compute_fn(), dtype=np.float32)
-    np.savez_compressed(path, similarity=sim)
-    print(f'[CACHE SAVE] Similarity matrix saved to: {path}')
-    return sim
-
-
 mega_cache_key = make_cache_key({
     **common_cache_info,
     'stage': 'similarity_mega',
+    'calibrated': False,
 })
 
 aliked_cache_key = make_cache_key({
     **common_cache_info,
     'stage': 'similarity_aliked',
+    'calibrated': False,
 })
 
 wildfusion_cache_key = make_cache_key({
@@ -313,7 +337,7 @@ wildfusion_cache_key = make_cache_key({
     'stage': 'similarity_wildfusion',
     'calibration_cache_key': calib_cache_key,
     'B': wildfusion_B,
-    'wildfusion_priority': 'matcher_mega',
+    'wildfusion_priority': 'matcher_mega_fusion',
 })
 
 similarity_mega = compute_or_load_similarity(
@@ -342,6 +366,7 @@ dataset_train_gallery_display = WildlifeDataset(
     load_label=True,
     col_label=label_column,
 )
+
 dataset_query_display = WildlifeDataset(
     root,
     test_metadata,

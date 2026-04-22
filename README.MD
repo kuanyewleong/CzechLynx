@@ -1,5 +1,7 @@
 # A Tool to Recognize Individual Lyxn using AI Model 
 
+![My Project Logo](https://github.com/user/repo/raw/main/assets/logo.png)
+
 ## Download Dataset
 Get the zipped data file from here:
 ```

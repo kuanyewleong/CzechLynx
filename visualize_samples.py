@@ -63,4 +63,10 @@ for i, idx in enumerate(idxs):
     ax[i].axis('off')
 
 plt.tight_layout()
-plt.show()
+# plt.show()
+
+# Save the figure to a file.
+plt.savefig("lynx_data_samples.png", bbox_inches='tight', dpi=150)
+
+# Close the plot to free up memory
+plt.close(fig)
